@@ -1,0 +1,840 @@
+Software security: Injection vulnerabilities, buffer overflows, and memory safety
+=================================================================================
+Credits: lecture notes judiciously adapted from MIT 6.858 by Nickolai Zeldovich & James Mickens
+
+Last lecture, we looked at the basics of performing a
+buffer overflow attack. That attack leveraged several
+observations:
+  -Systems software is often written in C (operating
+   systems, file systems, databases, compilers, network
+   servers, command shells and console utilities)
+  -C is essentially high-level assembly, so . . .
+       *Exposes raw pointers to memory
+       *Does not perform bounds-checking on arrays
+        (b/c the hardware doesn't do this, and C
+        wants to get you as close to the hardware
+        as possible)
+  -Attack also leveraged architectural knowledge about
+   how x86 code works:
+       *The direction that the stack grows
+       *Layout of stack variables (esp. arrays and
+        return addresses for functions)
+
+    void read_req() {
+      char buf[128];
+      int i;
+      gets(buf);
+      //. . . do stuff w/buf . . .
+    }
+
+    What does the compiler generate in terms of memory layout?
+    x86 stack looks like this:
+      %esp points to the last (bottom-most) valid thing on
+      the stack.
+      
+      %ebp points to the caller's %esp value.
+
+                         +------------------+
+        entry %ebp ----> | .. prev frame .. |
+                         |                  |  |
+                         |                  |  | stack grows down
+                         +------------------+  |
+        entry %esp ----> |  return address  |  v
+                         +------------------+
+        new %ebp ------> |    saved %ebp    |
+                         +------------------+
+                         |     buf[127]     |
+                         |       ...        |
+                         |      buf[0]      |
+                         +------------------+
+        new %esp ------> |        i         |
+                         +------------------+
+
+
+How does the adversary take advantage of this code?
+  -Supply long input, overwrite data on stack past buffer.
+  -Key observation 1: attacker can overwrite the return
+   address, make the program jump to a place of the
+   attacker's choosing!
+  -Key observation 2: attacker can set return address to
+   the buffer itself, include some x86 code in there!
+
+What can the attackers do once they are executing code?
+  -Use any privileges of the process! If the process is
+   running as root or Administrator, it can do whatever
+   it wants on the system. Even if the process is not
+   running as root, it can send spam, read files, and
+   interestingly, attack or subvert other machines behind
+   the firewall.
+  -Hmmm, but why didn't the OS notice that the buffer has
+   been overrun?
+       *As far as the OS is aware, nothing strange has
+        happened! Remember that, to a first approximation,
+        the OS only gets invoked by the web server when
+        the server does IO or IPC. Other than that, the
+        OS basically sits back and lets the program execute,
+        relying on hardware page tables to prevent processes
+        from tampering with each other's memory. However,
+        page table protections don't prevent buffer overruns
+        launched by a process "against itself," since the
+        overflowed buffer and the return address and all of
+        that stuff are inside the process's valid address
+        space.
+       *Later in this lecture, we'll talk about things
+        that the OS *can* do to make buffer overflows
+        more difficult.
+
+
+FIXING BUFFER OVERFLOWS
+-----------------------
+Approach #1: Avoid bugs in C code.
+  -Programmer should carefully check sizes of buffers,
+   strings, arrays, etc. In particular, the programmer
+   should use standard library functions that take
+   buffer sizes into account (strncpy() instead of strcpy(),
+   fgets() instead of gets(), etc.).
+  -Modern versions of gcc and Visual Studio warn you when
+   a program uses unsafe functions like gets(). In general,
+   YOU SHOULD NOT IGNORE COMPILER WARNINGS. Treat warnings
+   like errors!
+
+  -Good: Avoid problems in the first place!
+  -Bad: It's hard to ensure that code is bug-free, particularly
+   if the code base is large. Also, the application itself may
+   define buffer manipulation functions which do not use fgets()
+   or strcpy() as primitives.
+
+Approach #2: Build tools to help programmers find bugs.
+  -For example, we can use static analysis to find problems in
+   source code before it's compiled. Imagine that you had a
+   function like this:
+        void foo(int *p) {
+            int offset;
+            int *z = p + offset;
+            if(offset > 7){
+                bar(offset);
+            }
+        }
+
+        By statically analyzing the control flow, we can tell
+        that offset is used without being initialized.
+
+    We'll not cover static analysis in-depth in this course.
+
+    Let's have a quick look at one technique that you should be aware of.
+
+  -Symbolic Execution (SE) is a program analysis technique that aims to
+    analyze all possible code paths in a given program.
+
+    Consider the example function:
+      void function(int x) {
+        if (x > 10) {
+          int y = x + 5;
+          if (y < 20) {
+            action1();
+          } else {
+            action2();
+          }
+        } else {
+          action3();
+        }
+      }
+
+    With SE, initially, program inputs are symbolic and can take any value, much like
+    an unknown "x" in a mathematical equation.
+    When the execution encounters a branch (e.g., an if-statement) that depends on a
+    symbolic value, the SE engine tries to explore both possibilities.
+    However, the symbolic variable in each branch is now constrained, such that the
+    branch condition is true in the first branch and false in the second.
+    Following all feasible paths, the SE engine accumulates a set of constraints that form a
+    path condition. Each path condition defines a class of values for which the
+    program takes exactly the same path.
+    For example, the path leading to action1() is taken if the condition x > 10 & y < 20 holds.
+    The SE engine also tracks the constraint that y = x + 5.
+
+    If curious about SE, here is a video of a tool called Pex for automated exploratory testing for .NET.
+    Pex is integrated with MS Visual Studio 2010+.
+    http://channel9.msdn.com/blogs/briankel/pex-automated-exploratory-testing-for-net
+
+  -"Fuzzers" that supply random inputs can be effective for
+   finding bugs. Note that fuzzing can be combined with static
+   analysis to maximize code coverage!
+  
+  Bad: Difficult to prove the complete absence of bugs, esp.
+  for unsafe code like C.
+  Good: Even partial analysis is useful, since programs should
+  become strictly less buggy.
+
+Approach #3: Use a memory-safe language (JavaScript, C#, Python).
+  Good: Prevents memory corruption errors by not exposing raw
+  memory addresses to the programmer, and by automatically
+  handling garbage collection.
+  
+  Bad: Low-level runtime code DOES use raw memory addresses.
+  So, that runtime core still needs to be correct. For example,
+  heap spray attacks:
+  https://www.usenix.org/legacy/event/sec09/tech/full_papers/ratanaworabhan.pdf
+   https://www.corelan.be/index.php/2011/12/31/exploit-writing-tutorial-part-11-heap-spraying-demystified/
+  
+  Bad: Still have a lot of legacy code in unsafe languages
+  (FORTRAN and COBOL oh noes).
+  
+  Bad: Maybe you need access to low-level hardware features
+  b/c, e.g., you're writing a device driver.
+  
+  Bad: Perf is worse than a fine-tuned C application?
+      *Used to be a bigger problem, but hardware and
+       high-level languages are getting better.
+           -JIT compilation FTW!
+           -asm.js is within 2x of native C++ perf!
+            [http://asmjs.org/faq.html]
+      *Use careful coding to avoid garbage collection
+       jitter in critical path.
+      *Maybe you're a bad person/language chauvinist
+       who doesn't know how to pick the right tool
+       for the job. If your task is I/O-bound, raw
+       compute speed is much less important. Also,
+       don't be the chump who writes text manipulation
+       programs in C.
+
+All 3 above approaches are effective and widely used, but
+buffer overflows are still a problem in practice.
+  -Large/complicated legacy code written in C is very prevalent.
+  -Even newly written code in C/C++ can have memory errors.
+
+How can we mitigate buffer overflows despite buggy code?
+  -Two things going on in a "traditional" buffer overflow:
+      1) Adversary gains control over execution (program counter or instruction pointer).
+      2) Adversary executes some malicious code.
+  -What are the difficulties to these two steps?
+      1) Requires overwriting a code pointer (which is later invoked).
+      Common target is a return address using a buffer on the stack.
+      Any memory error could potentially work, in practice.
+      Function pointers, C++ vtables, exception handlers, etc.
+      
+      2) Requires some interesting code in process's memory.
+      This is often easier than #1, because:
+            -it's easy to put code in a buffer, and
+            -the process already contains a lot of code that
+             might be exploitable.
+      However, the attacker needs to put this code in a
+      predictable location, so that the attacker can set the
+      code pointer to point to the evil code!
+
+Mitigation approach 1: canaries (e.g., StackGuard, gcc's Stack Smashing Protector (SSP))
+  -Idea: OK to overwrite code ptr, as long as we catch it before
+   invocation.
+  -One of the earlier systems: StackGuard
+      *Place a canary on the stack upon entry, check canary value
+        before return.
+      *Usually requires source code; compiler inserts canary 
+       checks.
+      *Q: Where is the canary on the stack diagram?
+       A: Canary must go "in front of" return address on the
+          stack, so that any overflow which rewrites return
+          address will also rewrite canary.
+        
+                         |                  |
+                         +------------------+
+        entry %esp ----> |  return address  |    ^
+                         +------------------+    |
+        new %ebp ------> |    saved %ebp    |    |
+                         +------------------+    |
+                         |     CANARY       |    | Overflow goes
+                         +------------------+    | this way.
+                         |     buf[127]     |    |
+                         |       ...        |    |
+                         |      buf[0]      |    |
+                         +------------------+
+                         |                  |
+
+  -Q: Suppose that the compiler always made the canary
+      4 bytes of the 'a' character. What's wrong with this?
+   A: Adversary can include the appropriate canary value
+      in the buffer overflow!
+   So, the canary must be either hard to guess, or it
+   can be easy to guess but still resilient against
+   buffer overflows. Here are examples of these approaches.
+        *"Terminator canary": four bytes (0, CR, LF, -1)
+         Idea: Many C functions treat these characters
+         as terminators(e.g., gets(), sprintf()). As a
+         result, if the canary matches one of these
+         terminators, then further writes won't happen.
+        *Random canary generated at program init time:
+         Much more common today (but, you need good
+         randomness!).
+
+What kinds of vulnerabilities will a stack canary not catch?
+  -Overwrites of function pointer variables before the canary.
+  -Attacker can overwrite a data pointer, then leverage it to
+   do arbitrary mem writes.
+      int *ptr = ...;
+      char buf[128];
+      gets(buf);  //Buffer is overflowed, and overwrites ptr.
+      *ptr = 5;   //Writes to an attacker-controlled address!
+                  //Canaries can't stop this kind of thing.
+  -Attacker can guess randomness
+  -Heap object overflows (function pointers, C++ vtables).
+  -malloc/free overflows
+        int main(int argc, char **argv) {
+            char *p, *q;
+            
+            p = malloc(1024);
+            q = malloc(1024);
+            if(argc >= 2)
+                strcpy(p, argv[1]);
+            free(q);
+            free(p);
+            return 0;
+        }              
+        
+        *Assume that the two blocks of memory belonging
+         to p and q are adjacent/nearby in memory.        
+        *Assume that malloc and free represent memory blocks
+         like this:
+
+            +----------------+  
+            |                |     
+            |   App data     |     
+            |                |      Allocated memory block
+            +----------------+     
+            |   size         |     
+            +----------------+  
+
+
+            +----------------+
+            |   size         |
+            +----------------+
+            |  ...empty...   |
+            +----------------+  
+            |   bkwd ptr     |     
+            +----------------+          
+            |   fwd ptr      |      Free memory block
+            +----------------+     
+            |   size         |     
+            +----------------+ 
+
+        *So, the buffer overrun in p will overwrite the
+         size value in q's memory block! Why is this a
+         problem?
+              -When free() merges two adjacent free blocks,
+               it needs to manipulate bkwd and fwd pointers . . .
+              -. . . and the pointer calculation uses
+               size to determine where the free memory
+               block structure lives!
+                       p = get_free_block_struct(size);
+                       bck = p->bk;
+                       fwd = p->fd;
+                       fwd->bk = bck;	//Writes memory!
+                       bck->fd = fwd;   //Writes memory!
+              -The free memory block is represented as a C
+               struct; by corrupting the size value, the
+               attacker can force free() to operate on a
+               fake struct that resides in attacker-controlled
+               memory and has attacker-controlled values
+               for the forward and backwards pointers.
+              -If the attacker knows how free() updates
+               the pointers, he can use that update code
+               to write an arbitrary value to an arbitrary
+               place. For example, the attacker can overwrite
+               a return address.
+        *Actual details are a bit more complicated; if you're
+         interested in gory details, go here:
+             http://www.win.tue.nl/~aeb/linux/hh/hh-11.html
+         The high-level point is that stack canaries won't
+         prevent this attack, because the attacker is "skipping
+         over" the canary and writing directly to the return
+         address!
+
+So, stack canaries are one approach for mitigating buffer
+overflows in buggy code.
+
+Mitigation approach 2: bounds checking.
+  -Overall goal: prevent pointer misuse by checking if pointers
+   are in range.
+  -Challenge: In C, it can be hard to differentiate between
+   a valid pointer and an invalid pointer. For example,
+   suppose that a program allocates an array of characters . . .
+       char x[1024];
+   . . . as well as a pointer to some place in that array, e.g.,
+       char *y = &x[107];
+   Is it OK to increment y to access subsequent elements?
+       *If x represents a string buffer, maybe yes.
+       *If x represents a network message, maybe no.
+   Life is even more complicated if the program uses unions.
+       union u{
+           int i;
+           struct s{
+               int j;
+               int k;
+           };
+       };
+       int *ptr = &(u.s.k); //Does this point to valid data?
+   The problem is that, in C, a pointer does not encode 
+   information about the intended usage semantics for that 
+   pointer.
+  -So, a lot of tools don't try to guess those semantics. 
+   Instead, the tools have a less lofty goal than "totally 
+   correct" pointer semantics: the tools just enforce the
+   memory bounds on heap objects and stack objects. At a high 
+   level, here's the goal:
+       For a pointer p' that's derived from p, p' should only
+       be dereferenced to access the valid memory region that
+       belongs to p.
+  -Enforcing memory bounds is a weaker goal than enforcing
+   "totally correct" pointer semantics. Programs can still shoot
+   themselves in the foot by trampling on their memory in nasty
+   ways (e.g., in the union example, the application may write
+   to ptr even though it's not defined).
+  -However, bounds checking is still useful because it prevents
+   *arbitrary* memory overwrites. The program can only trample
+   its memory if that memory is actually allocated! THIS IS
+   CONSIDERED PROGRESS IN THE WORLD OF C.
+  -A drawback of bounds checking is that it typically requires
+   changes to the compiler, and programs must be recompiled with
+   the new compiler. This is a problem if you only have access
+   to binaries.
+
+What are some approaches for implementing bounds checking?
+
+Bounds checking approach #1: Electric fences
+  -These are an old approach that had the virtue of being simple.
+  -Idea: Align each heap object with a guard page, and use page
+   tables to ensure that accesses to the guard page cause a 
+   fault.
+        +---------+
+        | Guard   |
+        |         |  ^
+        +---------+  | Overflows cause a page exception
+        |  Heap   |  |
+        |  obj    |  |
+        +---------+
+  -This is a convenient debugging technique, since a heap 
+   overflow will immediately cause a crash, as opposed to 
+   silently corrupting the heap and causing a failure at some 
+   indeterminate time in the future.
+  -Big advantage: Works without source code---don't need to
+   change compilers or recompile programs! [You *do* need to
+   relink them so that they use a new version of malloc which
+   implements electric fences.]
+  -Big disadvantage: Huge overhead! There's only one object
+   per page, and you have the overhead of a dummy page which
+   isn't used for "real" data.
+  -Summary: Electric fences can be useful as debugging technique,
+   and they can prevent some buffer overflows for heap objects.
+   However, electric fences can't protect the stack, and the
+   memory overhead is too high to use in production systems.
+
+Bounds checking approach #2: Fat pointer
+  -Idea: Modify the pointer representation to include bounds 
+   information. Now, a pointer includes a memory address and 
+   bounds information about an object that lives in that memory 
+   region.
+       *Ex:
+         Regular 32-bit pointer  
+          +-----------------+
+          | 4-byte address  |
+          +-----------------+
+         
+         Fat pointer (96 bits)
+ +-----------------+----------------+---------------------+
+ | 4-byte obj_base | 4-byte obj_end | 4-byte curr_address |
+ +-----------------+----------------+---------------------+
+       *You need to modify the compiler and recompile the 
+        programs to use the fat pointers. The compiler
+        generates code to abort the program if it dereferences
+        a pointer whose address is outside of its own
+        base...end range.
+             int *ptr = malloc(sizeof(int) * 2);
+             while(1){
+                 *ptr = 42;       <----------|
+                 ptr++;                      |
+             }                               |
+               ______________________________|
+              |
+        This line checks the current address of the pointer and
+        ensures that it's in-bounds. Thus, this line will fail
+        during the third iteration of the loop.
+  -Problem #1: It can be expensive to check all pointer
+   dereferences. The C community hates things that are
+   expensive, because C is all about SPEED SPEED SPEED.
+  -Problem #2: Fat pointers are incompatible with a lot of
+   existing software.
+       *You can't pass a fat pointer to an unmodified library.
+       *You can't use fat pointers in fixed-size data
+        structures. For example, sizeof(that_struct)
+        will change!
+       *Updates to fat pointers are not atomic, because they span
+        multiple words. Some programs assume that pointer writes
+        are atomic.
+
+Mitigation approach 3: non-executable memory (AMD's No-eXecute (NX) bit, Windows
+Data Execution Protection (DEP), W^X, ...)
+  -Modern hardware allows specifying read, write, and execute perms
+   for memory. (R, W permissions were there a long time ago; execute
+   is recent.)
+  -Can mark the stack non-executable, so that adversary cannot run
+   their code.
+     - non-executable means that the instruction pointer cannot point to that memory segment
+  -More generally, some systems enforce "W^X", meaning all memory
+   is either writable, or executable, but not both. (Of course,
+   it's OK to be neither.)
+      *Advantage: Potentially works without any application changes.
+      *Advantage: The hardware is watching you all of the time,
+       unlike the OS.
+      *Disadvantage: Harder to dynamically generate code (esp.
+       with W^X).
+           -JITs like Java runtimes, Javascript engines, generate
+            x86 on the fly.
+           -Can work around it, by first writing, then changing to
+            executable.
+
+Mitigation approach 4: randomized memory addresses (ASLR, stack
+randomization, ...)
+  -Observation: Many attacks use hardcoded addresses in shellcode!
+   [The attacker grabs a binary and uses gdb to figure out where
+   stuff lives.]
+  -So, we can make it difficult for the attacker to guess a valid
+   code pointer.
+      *Stack randomization: Move stack to random locations, and/or
+       place padding between stack variables. This makes it more
+       difficult for attackers to determine:
+           -Where the return address for the current frame is
+            located
+           -Where the attacker's shellcode buffer will be located
+      *Randomize entire address space (Address Space Layout
+       Randomization (ASLR)): randomize the stack, the heap, location of
+       DLLs, etc.
+           -Rely on the fact that a lot of code is relocatable.
+           -Dynamic loader can choose random address for each
+            library, program.
+           -Adversary doesn't know address of system(), etc.
+      *Can this still be exploited?
+           -Adversary might guess randomness. Especially on 32-bit
+            machines, there aren't many random bits (e.g., 1 bit
+            belongs to kernel/user mode divide, 12 bits can't be
+            randomized because memory-mapped pages need to be
+            aligned with page boundaries, etc.).
+                *For example, attacker could buffer overflow and
+                 try to overwrite the return address with the
+                 address of sleep(16), and then seeing if the
+                 connection hangs for 16 seconds, or if it crashes
+                 (in which case the server forks a new ASLR process
+                 with the same ASLR offsets). sleep() could be
+                 in one of 2^16 or 2^28 places.
+                 [More details: https://cseweb.ucsd.edu/~hovav/dist/asrandom.pdf]
+           -ASLR is more practical on 64-bit machines (easily
+            32 bits of randomness).
+  -Adversary might extract randomness.
+       *Programs might generate a stack trace or error message
+        which contains a pointer.
+       *If adversaries can run some code, they might be able to
+        extract real addresses (JIT'd code?).
+  -Adversary might not care exactly where to jump.
+       *Ex: "Heap spraying" attack
+        Attack generates a lot of shellcode strings.
+        Even if attacker cannot figure out the precise address,
+        maybe a random jump is OK if there is enough shellcode.
+        Sometimes doing a random jump can lead to wrong instruction errors.
+        But the shellcode can include many NOP instructions so that jumping to any of those
+        is effective no matter where in the shellcode the attack jumps to.
+
+  -Adversary might exploit some code that's not randomized (if such
+   code exists).
+       *The primer on ROP article has a nice example of this.
+       The attacker manages to bypass ASLR by exploiting the fact that the program has
+       two pointers to the read and write functions. These pointers are at a known location.
+       So, although the address of read and write are random, the attacker can still execute
+       the functions by using pointers at known locations to these functions.
+  -Some other interesting uses of randomization:
+       *System call randomization (each process has its own system
+        call numbers).
+       *Instruction set randomization so that attacker cannot
+        easily determine what "shellcode" looks like for a
+        particular program instantiation.
+              *Ex: Imagine that the processor had a special
+               register to hold a "decoding key." Each installation
+               of a particular application is associated with a
+               random key. Each machine instruction in the application
+               is XOR'ed with this key. When the OS launches the
+               process, it sets the decoding key register, and the
+               processor uses this key to decode instructions before
+               executing them.
+
+Which buffer overflow defenses are used in practice?
+  -gcc and MSVC enable stack canaries by default.
+  -Linux and Windows include ASLR and NX by default.
+  -Bounds checking is not as common, due to:
+       1) Performance overheads
+       2) Need to recompile programs
+       3) False alarms: Common theme in security tools: false
+          alarms prevent adoption of tools! Often, zero false
+          alarms with some misses better than zero misses
+          but false alarms.
+
+
+RETURN-ORIENTED PROGRAMMING (ROP)
+---------------------------------
+ROP—return-oriented programming is a modern name for a classic exploit
+called "return into libc" or arc injection.
+
+ASLR and DEP are very powerful defensive techniques.
+  -DEP prevents the attacker from executing stack code of his
+   or her choosing
+  -ASLR prevents the attacker from determining where shellcode
+   or return addresses are located.
+  -However, what if the attacker could find PREEXISTING CODE
+   with KNOWN FUNCTIONALITY that was located at a KNOWN LOCATION?
+   Then, the attacker could invoke that code to do evil.
+       *Of course, the preexisting code isn't *intentionally*
+        evil, since it is a normal part of the application.
+       *However, the attacker can pass that code unexpected
+        arguments, or jump to the middle of the code and
+        only execute a desired piece of that code.
+
+These kinds of attacks are called return-oriented programming,
+or ROP. To understand how ROP works, let's examine a simple
+C program that has a security vulnerability.
+[Example adapted from here: http://codearcana.com/posts/2013/05/28/introduction-to-return-oriented-programming-rop.html]
+       
+       void run_shell(){
+           system("/bin/bash");
+       }
+       
+       void process_msg(){
+           char buf[128];
+           gets(buf);
+       }
+
+       Let's imagine that the system does not use ASLR or stack
+       canaries, but it does use DEP. process_msg() has an obvious
+       buffer overflow, but the attacker can't use this overflow
+       to execute shellcode in buf, since DEP makes the stack
+       non-executable. However, that run_shell() function looks
+       tempting . . . how can the attacker execute it?
+           1) Attacker disassembles the program and figures out
+              where the starting address of run_shell().
+           2) The attacker launches the buffer overflow, and
+              overwrites the return address of process_msg()
+              with the address of run_shell(). Boom! The attacker
+              now has access to a shell which runs with the
+              privileges of the application.
+
+                    +------------------+
+   entry %ebp ----> | .. prev frame .. |
+                    |                  |  
+                    |                  |
+                    +------------------+
+   entry %esp ----> |  return address  | ^    <--Gets overwritten 
+                    +------------------+ |       with address of
+   new %ebp ------> |    saved %ebp    | |       run_shell()
+                    +------------------+ |
+                    |     buf[127]     | |
+                    |       ...        | |
+                    |      buf[0]      | |
+   new %esp ------> +------------------+
+
+That's a straightforward extension of the buffer overflows that
+we've already looked at. But how can we pass arguments to the
+function that we're jumping to?
+       
+       char *bash_path = "/bin/bash";
+       
+       void run_cmd(){
+           system("/something/boring");
+       }
+       
+       void process_msg(){
+           char buf[128];
+           gets(buf);
+       }
+
+       In this case, the argument that we want to pass to
+       is already located in the program code. There's also
+       a preexisting call to system(), but that call isn't
+       passing the argument that we want.
+       
+       We know that system() must be getting linked to our
+       program. So, using our trusty friend gdb, we can find
+       where the system() function is located, and where
+       bash_path is located.
+       
+       To call system() with the bash_path argument, we have
+       to set up the stack in the way that system() expects
+       when we jump to it. Essentially we need to setup a
+       fake calling frame. Right after we jump to system(),
+       system() expects this to be on the stack:
+                   |        ...       |
+                   +------------------+
+                   |     argument     |  The system() argument.
+                   +------------------+
+      %esp ---->   |    return addr   |  Where system() should 
+                   +------------------+  ret after it has
+                                         finished.
+                                               
+       So, the buffer overflow needs to set up a stack that
+       looks like this:
+                   +------------------+
+  entry %ebp ----> | .. prev frame .. |
+                   |                  |
+                   |                  |
+                   |  - - - - - - - - | ^
+                   |                  | | Address of bash_path 
+                   +  - - - - - - - - | |
+                   |                  | | Junk return addr for system()
+                   +------------------+ |
+  entry %esp ----> |  return address  | | Address of system()
+                   +------------------+ | 
+  new %ebp ------> |    saved %ebp    | | Junk
+                   +------------------+ |
+                   |     buf[127]     | |
+                   |       ...        | | Junk
+                   |      buf[0]      | |
+  new %esp ------> +------------------+ |
+       
+       In essence, what we've done is set up a fake calling
+       frame for the system() call! In other words, we've
+       simulated what the compiler would do if it actually
+       wanted to setup a call to system().
+       
+What if the string "/bin/bash" was not in the program?
+  -We could include that string in the buffer overflow,
+   and then have the argument to system() point to
+   the string.
+                   |    h\0           | ^
+                   |  - - - - - - - - | |
+                   |    /bas          | |
+                   |  - - - - - - - - | |
+                   |    /bin          | |  <--------------------+
+                   |  - - - - - - - - | |                       |
+                   |                  | | Address of bash_path--+
+                   +  - - - - - - - - | |
+                   |                  | | Junk return addr from system()
+                   +------------------+ |
+  entry %esp ----> |  return address  | | Address of system()
+                   +------------------+ | 
+  new %ebp ------> |    saved %ebp    | | Junk
+                   +------------------+ |
+                   |     buf[127]     | |
+                   |       ...        | | Junk
+                   |      buf[0]      | |
+  new %esp ------> +------------------+ |
+ 
+   Note that, in these examples, I've been assuming that
+   the attacker used a junk return address from system().
+   However, the attacker could set it to something
+   useful.
+
+   In fact, by setting it to something useful, the attacker
+   can chain calls together!
+
+   GOAL: We want to call system("/bin/bash") multiple times.
+   Assume that we've found three addresses:
+       1) The address of system()
+       2) The address of the string "/bin/bash"
+       3) The address of these x86 opcodes:
+             pop %eax    //Pops the top-of-stack and puts it in %eax
+             ret         //Pops the top-of-stack and puts it in %eip
+          These opcodes are an example of a "gadget." Gadgets
+          are preexisting instruction sequences that can be
+          pieced together to create an exploit. Note that there
+          are user-friendly tools to help you extract gadgets
+          from preexisting binaries (e.g., msfelfscan).
+          [http://www.exploit-db.com/download_pdf/17049/]
+
+
+                  |                  | ^
+                  +  - - - - - - - - + |
+                  |                  | | Address of bash_path -+ Fake calling
+                  +  - - - - - - - - + |                       | frame for
+      (4)         |                  | | Address of pop/ret   -+ system()
+                  +  - - - - - - - - + | 
+      (3)         |                  | | Address of system()
+                  +  - - - - - - - - + |
+      (2)         |                  | | Address of bash_path -+ Fake calling
+                  +  - - - - - - - - + |                       | frame for
+      (1)         |                  | | Address of pop/ret   -+ system()
+                  +------------------+ |
+ entry %esp ----> |  return address  | | Address of system()
+                  +------------------+ | 
+ new %ebp ------> |    saved %ebp    | | Junk
+                  +------------------+ |
+                  |     buf[127]     | |
+                  |       ...        | | Junk
+ new %esp ------> |      buf[0]      | |
+                  +------------------+ |
+
+       So, how does this work? Remember that the return instruction
+       pops the top of the stack and puts it into %eip.
+       1) The overflowed function terminates by issuing ret. ret
+          pops off the top-of-the-stack (the address of system())
+          and sets %eip to it. system() starts executing, and
+          %esp is now at (1), and points to the pop/ret gadget.
+       2) system() finishes execution and calls ret. %esp goes
+          from (1)-->(2) as the ret instruction pops the top
+          of the stack and assigns it to %eip. %eip is now the
+          start of the pop/ret gadget.
+       3) The pop instruction in the pop/ret gadget discards the
+          bash_path variable from the stack. %esp is now at (3).
+          We are still in the pop/ret gadget!
+       4) The ret instruction in the pop/ret gadget pops the
+          top-of-the-stack and puts it into %eip. Now we're in
+          system() again, and %esp is (4).
+       
+       And so on and so forth.
+
+       Basically, we've created a new type of machine that
+       is driven by the stack pointer instead of the regular
+       instruction pointer! As the stack pointer moves up
+       the stack, it executes gadgets whose code comes from
+       preexisting program code, and whose data comes from
+       stack data created by the buffer overflow.
+
+       This attack evades DEP protections--we're not generating
+       any new code, just invoking preexisting code!
+
+The next thing we might want to do is to defeat stack canaries.
+  -Assumptions:
+       1) The remote server has a buffer overflow vulnerability.
+       2) Server crashes and restarts if a canary value is set
+          to an incorrect value.
+       3) When the server respawns, the canary is NOT re-randomized,
+          and the ASLR is NOT re-randomized, e.g., because the
+          server uses Linux's position-independent executable (PIE) mechanism,
+          and fork() is used to make new workers and not execve().
+  -So, to determine an 8-byte canary value:
+       char canary[8];
+       for(int i = 1; i <= 8; i++){  //For each canary byte . . .
+           for(char c = 0; c < 256; c++){  //. . . guess the value.
+               canary[i-1] = c;
+               server_crashed = try_i_byte_overflow(i, canary);
+               if(!server_crashed){
+                   //We've discovered i-th byte of the
+                   //the canary!
+                   break;
+               }
+           }
+       }
+       //At this point we have the canary, but remember that the
+       //attack assumes that the server uses the same canary after
+       //a crash.
+       
+       Guessing the correct value for a byte takes 128 guesses on
+       average, so on a 32-bit system, we only need 4*128=512
+       guesses to determine the canary (on a 64-bit system, we
+       need 8*128=1024).
+              *Much faster than brute force attacks on the
+               canary (2^15 or 2^27 expected guesses on
+               32/64 bit systems with 16/28 bits of ASLR
+               randomness).
+              *Brute force attacks can use the sleep(16)
+               probe that we discussed earlier.
+  -Canary reading can be extended to reading arbitrary values
+   that the buffer overflow can overwrite!
+
+More info on ROP and x86 calling conventions:
+http://codearcana.com/posts/2013/05/21/a-brief-introduction-to-x86-calling-conventions.html
+http://codearcana.com/posts/2013/05/28/introduction-to-return-oriented-programming-rop.html
+http://www.slideshare.net/saumilshah/dive-into-rop-a-quick-introduction-to-return-oriented-programming
+https://cseweb.ucsd.edu/~hovav/dist/rop.pdf
+
