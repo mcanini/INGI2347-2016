@@ -62,7 +62,7 @@ clean:
 
 
 project%-handin.tgz: clean
-	tar cf - `find . -type f | grep -v '^\.*$$' | grep -v '/CVS/' | grep -v '/\.svn/' | grep -v '/\.git/' | grep -v 'project[0-9].*\.tgz'` | gzip > $@
+	tar cf - `find . -type f | grep -v '^\.*$$' | grep -v '/core.*/' | grep -v '/CVS/' | grep -v '/\.svn/' | grep -v '/\.git/' | grep -v 'project[0-9].*\.tgz'` | gzip > $@
 
 .PHONY: prepare-submit
 prepare-submit: project1-handin.tgz
