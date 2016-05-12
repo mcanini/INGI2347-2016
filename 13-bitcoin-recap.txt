@@ -1,0 +1,320 @@
+Bitcoin
+=======
+
+Credits: notes based on the lecture on Bitcoin and Cryptocurrency
+Technologies Online Course by Prof. Arvind Narayanan
+
+
+Blockchain
+==========
+
+Is a list of blocks. Unlike a regular list, each block uses a hash
+pointer to point to the previous block of data. Each has pointer
+encodes the block it points to as well as a hash of the block itself.
+
+So every block contains a hash of the block it extends!
+
+We are going to remember the head of the list, using a hash pointer
+itself. Thanks to the use of hash pointers, this becomes a
+tamper-evident log. This means that we can keep on adding data to the
+log and if at any point someone attempts to alter what was recorded in
+the log, we are going to be able to detect it.
+
+Distributed consensus
+=====================
+
+Bitcoin's key challenge: Nodes of the network need to agree on the
+state of the blockchain.
+
+Identities
+==========
+
+There are no node identities in Bitcoin. In a P2P system there is no
+centralized authority to hand out and control identities. Sybil
+attacks are possible where attackers create new nodes at will. Instead
+identities in Bitcoin are key pairs. But there are no real identities
+in Bitcoin. Bitcoin is based on pseudo-anonymity. Any user can create
+any identity at any time.
+
+Bitcoin does not incorporate a way to dicover addresses. Alice and Bob
+need a different mechanism.
+
+Transactions
+============
+Transactions are broadcast to the network. Transactions are
+instructions that say what value amount of Bitcoin is transferred and
+from which source address to which destination address. The coin is a
+chain of transactions.
+
+What it means for a transaction to be part of the blockchain?
+
+It means that it has received lots of confirmations. There is no fixed
+number. A commonly used heuristic is 6. The more confirmation a
+transaction receives (meaning the more blocks that extend the block
+containing that transaction) the more certain one can be that the
+transaction is part of the consensus of the blockchain.
+
+P2P Network
+===========
+
+The P2P network is to communicate all transactions as well as new
+blocks to all P2P nodes. It is a best effort service. The security of
+the system does not come from the perfection of the network. In fact
+the underlying assumption is that the network is unreliable.
+
+Instead the security comes from is from the blockchain and the
+consensus protocol.
+
+Nodes always consider and add to the longer branch of the consensus
+chain and discard blocks that are invalid.
+
+Orphan blocks
+=============
+
+These are blocks that don't make it the consensus chain. Could be due
+to an invalid transaction or a double spent attempt. It could also be
+due to latency in the network and the fact that two miners competing
+to compute the proof-of-work puzzle, end up finishing within a few
+seconds of each other. And so both blocks were broadcast near
+simultaneously onto the network.
+
+Mining
+======
+
+A subtle point regarding miner is that if Alice has 100 times the
+mining capacity of Bob. This does not mean that Alice will always win
+against Bob the race to finding the next block. This means that on
+average Alice has a probability of success that is 100 times the one
+of Bob. On the long term, Bob will find on average 1% of the blocks
+that Alice does.
+
+Miners are special type of node that compete in the game creating new
+blocks and are rewarded for their efforts. We expect the number of
+miners in the long term to be at the equilibrium in the amount of
+expenditure they incur due to hardware and electricity versus and the
+reward they receive from block creation reward and transaction fee
+reward.
+
+Incentives
+==========
+
+1. block reward
+
+Creator of a block gets to include a special coin-creation transaction
+in the block that is transferred to a chosen recipient address. The
+value is fixed: currently 25 BTC, halves every 4 years. Block creator
+gets to collect the reward only if the block ends up on the long-term
+consensus branch. This incentivizes nodes to play by the rules.
+
+There's a finite supply of Bitcoins. Total supply of 21 million. Block
+reward is the only way in which Bitcoin are created. This reward will
+stop working in 2040, according to current rules. Besides this
+incentive, there is another one.
+
+2. transaction reward
+
+Creator of a transaction can choose to make output value less than
+input value. The remainder is a transaction fee and goes to the block
+creator. The idea is that the total sum of fees can be a reward that
+incentivizes miners. Currently transaction fee is voluntary but it
+will progressively become more and more expected in order to get a
+certain quality of service.
+
+Proof-of-work
+=============
+
+The main idea behind consensus in Bitcoin is that one random node gets
+to decide which block gets appended to the block chain. Because of the
+decentralization and lack of any notion of global time, we must
+approximate selecting a random node. The idea is to select nodes in
+proportion to a resource tha no one can monopolize. If this resource
+is computing power, it's called proof-of-work.
+
+Equivalent views of proof-of-work:
+1. Select nodes in proportion to computing power
+2. Let nodes compete for the right to create block
+3. Make it moderately hard to create new identities
+
+Proof-of-work in Bitcoin is bashed on a hash puzzle. To create a
+block, a node must find a nonce s.t.
+H(nonce || prev_hash || tx_1 || ... || tx_N) is very small,
+within a certain target space. If the hash function H is secure, then
+the only way to succeed is to try enough nonces until you get lucky.
+
+There are three main properties for proof-of-work:
+1. it must be difficult to compute (as of Aug 2014, about 10^20
+   hashes/block)
+2. it has a parameterizable cost (hardcoded in the software, set by
+   the rules). Nodes automatically re-calculate the target every two
+   weeks. The goal is to maintain an average time between blocks of
+   about 10 minutes.
+3. trivial to verify. Once a block is created and broadcast, every
+   node can trivially verify that the nonce found is correct. Nonce is
+   published. Nodes can simply verify that:
+   H(nonce || prev_hash || tx_1 || ... || tx_N)) < target space
+
+Solving puzzles is probabilistic. It is approximated by a Poisson
+process. The probability density function of any node finding a block
+follows an exponential distribution.
+
+Key security assumption
+=======================
+
+Attacks infeasible if majority of miners weighted by hash power follow
+the protocol.
+
+What can a "51% attacker" do?
+
+Steal coins from existing address? NO
+
+Suppress some transactions?
+* From the blockchain YES
+* From the P2P network NO
+
+Change the block reward? NO - attacker does not control copies of
+Bitcoin software running elsewhere
+
+Destroy confidence in Bitcoin? YES - main practical threat
+
+Consensus
+=========
+
+The notion of consensus permeates Bitcoin
+
+We need consensus regarding its value. This is given with its exchange
+rate. But consensus goes deeper in Bitcoin. You need consensus about
+state.
+
+What does it mean to own some Bitcoins? This relies on the notion of
+consensus on the state of the network. It means that the blockchain
+recorded in the network contains a chain of transactions towards my
+addresses that when combined sums up to the amount of Bitcoins that I
+own. That is the ultimate nature of truth in Bitcoin. So ownership of
+Bitcoins is nothing more than other nodes thinking that I won that
+amount of Bitcoins.
+
+There also need to be consensus regarding the rules of the system.
+
+
+Q&A
+
+
+1. Bitcoin mining seems to me like a huge ecological disaster, as I
+   understood it, it really constitutes a race to waste computational
+   resources which constantly requires to throw in more and more
+   computing power in order to maintain a steady source of income.
+
+   -> Correct. "In the world of cryptocurrencies, Proof of Work turned
+      into a monster devouring electricity in the race for mining
+      profit. Around 2012 the first serious complaints appeared, when
+      the total performance of Bitcoin network surpassed that of the
+      most productive supercomputer in the world (indeed, comparing
+      PFLOPS and Gigahashes is not exactly correct, but... sometimes
+      it is). "Waste of energy!" everyone cried." [1]
+
+   So I wondered:
+   * has there been any attempt to greenify bitcoin ? has this topic
+     already been investigated or is it broken beyond repair ?
+
+     -> proof-of-stake is an idea to avoid energy wastage. The concept
+     is "the limited resource used for voting can be found not only on
+     the outside (consumed power and hardware), but also inside the
+     system itself: the digital coins." [1]
+
+   * I have the impression that this resource waste stems from the PoW
+     model that has been chosen. Can the proof of ownership alleviate
+     that problem and how does it work ?
+
+     -> not with proof of ownership. "Proof of Ownership is a method
+     that uses Bitcoin's decentralized ledger (also called blockchain)
+     or Bitcoin-related technologies to track the different owners of
+     a certain information over the time." [2]
+
+     -> there are alternatives to proof-of-work. one is
+     proof-of-stake, which asks users to prove ownership of a certain
+     amount of currency (their "stake" in the currency). however it
+     has its own set of problems. [3]
+
+     "The Proof of Stake problem lies in the fact that it pays to mine
+     a number of alternative branches simultaneously. You can do this
+     for free, with non-zero chance of success, i.e. increase the
+     expected return." [1]
+
+     Also see [4]
+
+     I believe the ultimate answer here is that it is still an open
+     problem to figure out what mechanism makes the best trade-offs
+     while guaranteeing the resulting system is secure.
+
+   * An other way that might imho lead to a reduction of this problem
+     would be to "re-centralize" a little bit the mining process. For
+     instance, the set of "mining nodes" could registered to a
+     "central registrar" (ie similar to DNS) and use an explicit
+     consensus algorithm (i.e. raft since it has a protocol to deal
+     with the addition/decomissionig of nodes) to decide what node
+     will produce the next block.
+
+     -> it might as well be but the trade-off is that you give up on
+     decentralization of the system, which is the core philosophy
+     behind Bitcoin.
+
+     -> central banks are attempting to develop their own centralized
+     blockchain technologies (e.g., Chain, RSCoin). details should be
+     public as they aim to be open source technologies.
+
+     * Would this architecture still be safe (assuming a fee is being
+       paid for the registration of each mining node, in order to rule
+       out the sybil attacks ) ?
+
+       -> depends on what you mean by safe... if through
+       centralization, there is chance that a single entity would
+       control over 50% of the network. then, it is no longer
+       technically secure. One could say that it is still safe, if you
+       can trust the central entity. But can you?
+
+[1] https://bytecoin.org/blog/proof-of-stake-proof-of-work-comparison/
+[2] https://en.bitcoin.it/wiki/Proof_of_Ownership
+[3] https://en.wikipedia.org/wiki/Proof-of-stake
+[4] https://bitcoinmagazine.com/articles/what-proof-of-stake-is-and-why-it-matters-1377531463
+
+2. Also, I don't understand the rationale behind the fixed limit on
+   the number of bitcoins that will ever be produced. As it was said
+   in the 2nd presentation, Bitcoin is secure because people do trust
+   it and use it in order to perform trades.
+   * So why does the protocol seeks to avoid inflation so badly ? I
+     mean, from an economic perspective, inflation is THE tool which
+     is traditionally used to encourage people to buy trades and spend
+     their money so as to avoid the 'melting money' effect. Therefore,
+     I am wondering if there is anything I missed which could explain
+     why Bitcoin has set this limit.
+
+     -> I am not sure I can answer that as it requires understanding
+     the system from an economical perspective, which is beyond the
+     scope of this course. Someone gave a thoughtful answer to this on
+     Piazza.
+
+
+3. Is the reason behind bitcoins only anonymity ?
+
+   -> The stronger design philosophy behind Bitcoin is on
+   decentralization rather than anonymity. Bitcoin only provide
+   pseudo-anonymity.
+
+4. What happens if I lost my private key ? How can I spend the money
+   link to my lost public-private key pair ?
+
+   -> That is a big problem. Essentially you will lose your coins
+   because you can no longer spend them since you cannot sign new
+   transactions for your coins. It is even hard to tell whether some
+   coins are being lost or being saved up.
+
+5. Isn't it easy for someone to listen to all transactions done by a
+   given pseudonym because of the  peer-to-peer network used ? What
+   can it implies ?
+
+   -> It implies that pseudo-anonymity is not privacy. There is
+   research (including the reading for the Bitcoin lecture) that
+   demonstrates how it is possible to associate certain transactions
+   with identities and use histories of these transactions to at least
+   profile the real identity of Bitcoin addresses.
+
